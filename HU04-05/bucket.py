@@ -15,27 +15,28 @@ class Bucket:
 
 
 
-    def insert(self, position, register):
+    def insert(self, register):
         try:
             if len(self.registers) == self.bucket_size:
-                self.overflow =  Bucket(self.bucket_size)
-                self.overflow.insert(0, register)
+                if(self.overflow != None):
+                    self.overflow.insert((len(self.overflow.registers)-1), register)
+                else:
+                    self.overflow =  Bucket(self.bucket_size)
+                    self.overflow.insert(0, register)
             elif len(self.registers) > self.bucket_size:
                 self.overflow.insert((len(self.overflow)-1), register)
             else:
-                self.registers[position] = register
+                self.registers[len(self.registers)-1] = register
         except IndexError:
             print("Index out of bounds")
-    """
-    #estou errado aqui e no insert de overflow anterior. nao da pra rodar len no self overflow 
-    pois ele é um Objeto, não uma lista. Para conseugir fazer isso corretamente, tenho que rodar o len
-    em cima da lista de registros do objeto overflow.
-    Além disso, acho que não é correto fazer o overflow ser um objeto do tipo Bucket, pois pode ter o caso de encher
-    o overflow e aí vou ter que criar outro overflow pro overlow? será qu faz sentid?e
-    """
+
     def getWord(self, position):
         try:
-            return self.registers[position]
+            if position <= self.bucket_size:
+                return self.registers[position]
+            else:
+                return self.overflow.getWord(position - self.bucket_size)
         except IndexError:
             print("Index out of bounds")
+
 
