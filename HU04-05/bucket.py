@@ -5,38 +5,32 @@ from typing import overload
 class Bucket:
     def __init__(self, bucket_size):
         self.bucket_size = bucket_size
-        self.registers = [None] * self.bucket_size
+        self.registers = []
         self.overflow = None #inicia como registers e adiciona mais valores quando registers encher
-        """
-        talvez essa do overflow nao tenha sido a melhor forma de fazer. o que quero é que no fim de registers tenha,
-        após o n'ésimo registro, um ponteiro indicando a lista de overflow. Para isso, acho que preciso usar uma
-        linked list com os n espaços + 1 espaço que é a lista de overflow.
-        """
 
 
-
-    def insert(self, register):
+    def insert(self, key, page_id):
         try:
-            if len(self.registers) == self.bucket_size:
-                if(self.overflow != None):
-                    self.overflow.insert((len(self.overflow.registers)-1), register)
-                else:
+            if len(self.registers) == self.bucket_size: # limite máximo do bucket, agora é overflow!
+                if(self.overflow != None): # Se o bucket do overflow já tiver sido criado, só insere
+                    self.overflow.insert(key, page_id)
+                else: # Senão, cria o bucket de overflow e insere o novo registro
                     self.overflow =  Bucket(self.bucket_size)
-                    self.overflow.insert(0, register)
+                    self.overflow.insert(key, page_id)
             elif len(self.registers) > self.bucket_size:
-                self.overflow.insert((len(self.overflow)-1), register)
+                self.overflow.insert(key, page_id)
             else:
-                self.registers[len(self.registers)-1] = register
+                self.registers.append((key, page_id))
         except IndexError:
             print("Index out of bounds")
 
-    def getWord(self, position):
-        try:
-            if position <= self.bucket_size:
-                return self.registers[position]
-            else:
-                return self.overflow.getWord(position - self.bucket_size)
-        except IndexError:
-            print("Index out of bounds")
+    def search(self, key):
+        page_id = next(
+            (r[1] for r in self.registers if r[0] == key),
+            None
+        )
+        if self.overflow != None:
+            return self.overflow.search(key)
+        return None
 
 
