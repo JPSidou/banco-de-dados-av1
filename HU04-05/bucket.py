@@ -29,6 +29,10 @@ class Bucket:
             (r[1] for r in self.registers if r[0] == key),
             None
         )
+
+        if page_id != None:
+            return page_id
+
         if self.overflow != None:
             return self.overflow.search(key)
         return None
