@@ -1,3 +1,4 @@
+import math
 import tkinter as tk
 from tkinter import filedialog, ttk
 
@@ -6,6 +7,7 @@ from hasher import hash_word_to_bucket
 from index_builder import build_index, count_indexed_registers
 from index_search import search_with_index_trace
 from index_statistics import bucket_chain, collision_statistics, overflow_statistics
+from performance_comparator import compare
 from table_scan import table_scan
 
 BUCKET_SIZE = 10  # FR: capacidade do bucket definida pela equipe (RN09)
@@ -18,7 +20,15 @@ def read_words(path):
 
 
 def split_into_pages(words, page_size):
-    return [words[i:i + page_size] for i in range(0, len(words), page_size)]
+    """
+    CA02: As páginas devem ser criadas vazias antes de serem carregadas com as palavras.
+    RN06 / RN07: Divisão calculada automaticamente (NR / tamanho de página).
+    """
+    num_pages = math.ceil(len(words) / page_size)
+    pages = [[] for _ in range(num_pages)]  # Cria as páginas vazias antes da carga
+    for index, word in enumerate(words):
+        pages[index // page_size].append(word)
+    return pages
 
 
 def format_int(value):
@@ -128,7 +138,7 @@ class HashIndexApp:
         fields = [
             ("registers", "Registros indexados:"),
             ("build_time", "Tempo de construção:"),
-            ("pages", "Páginas percorridas:"),
+            ("pages", "Quantidade de páginas (CA06):"),
             ("buckets", "Buckets (NB / FR):"),
             ("collision_rate", "Taxa de colisões:"),
             ("overflow_rate", "Taxa de overflow:"),
@@ -159,6 +169,9 @@ class HashIndexApp:
         self.scan_button = ttk.Button(
             search, text="Table scan", command=self.run_table_scan, state="disabled")
         self.scan_button.grid(row=0, column=3, padx=(8, 0))
+        self.compare_button = ttk.Button(
+            search, text="Comparar", command=self.run_comparison, state="disabled")
+        self.compare_button.grid(row=0, column=4, padx=(8, 0))
 
         # HU14 - visualização das estruturas
         self.notebook = ttk.Notebook(self.root)
@@ -167,6 +180,7 @@ class HashIndexApp:
         self._build_buckets_tab()
         self._build_index_search_tab()
         self._build_scan_tab()
+        self._build_comparison_tab()
 
         self.status_label = ttk.Label(
             self.root, textvariable=self.status, anchor="w", padding=(10, 4), relief="sunken")
@@ -243,6 +257,41 @@ class HashIndexApp:
         frame, self.records_list, _ = scrolled_list(tab, "Registros lidos durante o scan")
         frame.grid(row=1, column=0, sticky="nsew")
 
+    def _build_comparison_tab(self):
+        # HU11: Comparativo de tempo e custo entre índice e table scan (CA23 / CA24)
+        self.comparison_tab = ttk.Frame(self.notebook, padding=10)
+        tab = self.comparison_tab
+        self.notebook.add(tab, text="Comparativo (HU11)")
+        tab.columnconfigure(0, weight=1)
+        tab.rowconfigure(1, weight=1)
+
+        self.comparison_summary = tk.StringVar(
+            value="Digite uma chave e clique em 'Comparar' para visualizar o comparativo.")
+        ttk.Label(tab, textvariable=self.comparison_summary, font="TkHeadingFont").grid(
+            row=0, column=0, sticky="w", pady=(0, 8))
+
+        columns = ("metric", "index", "scan", "diff")
+        self.comparison_tree = ttk.Treeview(tab, columns=columns, show="headings", height=7)
+        self.comparison_tree.heading("metric", text="Métrica de Comparação")
+        self.comparison_tree.heading("index", text="Busca por Índice (HU09)")
+        self.comparison_tree.heading("scan", text="Table Scan (HU10)")
+        self.comparison_tree.heading("diff", text="Comparativo / Ganho (HU11)")
+
+        self.comparison_tree.column("metric", width=250, anchor="w")
+        self.comparison_tree.column("index", width=180, anchor="center")
+        self.comparison_tree.column("scan", width=180, anchor="center")
+        self.comparison_tree.column("diff", width=240, anchor="center")
+
+        self.comparison_tree.grid(row=1, column=0, sticky="nsew", pady=(0, 10))
+
+        notes_frame = ttk.LabelFrame(tab, text="Análise Didática de Desempenho", padding=10)
+        notes_frame.grid(row=2, column=0, sticky="ew")
+        notes_frame.columnconfigure(0, weight=1)
+
+        self.comparison_notes = tk.StringVar(value="-")
+        ttk.Label(notes_frame, textvariable=self.comparison_notes, wraplength=850, justify="left").grid(
+            row=0, column=0, sticky="w")
+
     # ------------------------------------------------------------------ estado
 
     def _set_status(self, message, error=False):
@@ -255,6 +304,7 @@ class HashIndexApp:
         state = "normal" if enabled else "disabled"
         self.index_search_button.configure(state=state)
         self.scan_button.configure(state=state)
+        self.compare_button.configure(state=state)
 
     def _clear_index(self):
         self.pages = []
@@ -269,6 +319,9 @@ class HashIndexApp:
                         self.accessed_page_list, self.records_list):
             listbox.delete(0, "end")
 
+        for item in self.comparison_tree.get_children():
+            self.comparison_tree.delete(item)
+
         self.first_page_title.set("Primeira página")
         self.last_page_title.set("Última página")
         self.bucket_content_title.set("Conteúdo do bucket")
@@ -276,6 +329,8 @@ class HashIndexApp:
         self.accessed_page_title.set("Página acessada")
         self.search_result.set("")
         self.scan_result.set("")
+        self.comparison_summary.set("Digite uma chave e clique em 'Comparar' para visualizar o comparativo.")
+        self.comparison_notes.set("-")
         self._update_search_buttons()
 
     # ------------------------------------------------------------------ ações
@@ -290,9 +345,23 @@ class HashIndexApp:
 
         self._clear_index()
         self.file_path = path
-        self.file_label.set(path)
-        self.build_button.configure(state="normal")
-        self._set_status("Arquivo selecionado. Informe o tamanho da página e construa o índice.")
+
+        # CA02 / CA03: Valida e informa o total de palavras carregadas logo na seleção
+        try:
+            words = read_words(path)
+            if not words:
+                self.file_label.set(f"{path} (Arquivo vazio!)")
+                self.build_button.configure(state="disabled")
+                self._set_status("O arquivo selecionado está vazio.", error=True)
+                return
+
+            self.file_label.set(f"{path} ({format_int(len(words))} palavras)")
+            self.build_button.configure(state="normal")
+            self._set_status(f"Arquivo carregado com sucesso ({format_int(len(words))} palavras). Informe o tamanho da página e construa o índice.")
+        except (OSError, UnicodeDecodeError) as error:
+            self.file_label.set(f"{path} (Erro de leitura)")
+            self.build_button.configure(state="disabled")
+            self._set_status(f"Não foi possível ler o arquivo: {error}", error=True)
 
     def build(self):
         # CA05: com um valor inválido o índice anterior não fica disponível para continuar
@@ -376,9 +445,10 @@ class HashIndexApp:
         self.bucket_content_title.set(f"Conteúdo do bucket {index}")
         fill_list(self.bucket_content_list, lines, highlight)
 
-        self.bucket_list.selection_clear(0, "end")
-        self.bucket_list.selection_set(index)
-        self.bucket_list.see(index)
+        if self.bucket_list.size() > index:
+            self.bucket_list.selection_clear(0, "end")
+            self.bucket_list.selection_set(index)
+            self.bucket_list.see(index)
 
     def _on_bucket_selected(self, _event):
         selection = self.bucket_list.curselection()
@@ -403,10 +473,11 @@ class HashIndexApp:
         self._set_status(f"Mostrando o bucket {index}.")
 
     def _highlight_bucket(self, index):
-        if self.highlighted_bucket is not None:
-            self.bucket_list.itemconfigure(self.highlighted_bucket, background="")
-        self.bucket_list.itemconfigure(index, background=HIGHLIGHT_COLOR)
-        self.highlighted_bucket = index
+        if self.bucket_list.size() > index:
+            if self.highlighted_bucket is not None and self.bucket_list.size() > self.highlighted_bucket:
+                self.bucket_list.itemconfigure(self.highlighted_bucket, background="")
+            self.bucket_list.itemconfigure(index, background=HIGHLIGHT_COLOR)
+            self.highlighted_bucket = index
 
     def _search_steps(self, key, result):
         # RN27: ilustra o processo de busca passo a passo
@@ -480,10 +551,14 @@ class HashIndexApp:
         self.root.configure(cursor="watch")
         self.root.update_idletasks()
 
-        result = table_scan(self.pages, key)
+        # Limita a 1.000 registros na visualização para não travar a UI (RNF01)
+        result = table_scan(self.pages, key, max_records=1000)
 
-        # CA21: exibe todos os registros lidos durante o scan
+        # CA21: exibe os registros lidos durante o scan
         lines = [f"Página {page_id:>6} | {register}" for page_id, register in result["records_read"]]
+        if result["records_truncated"]:
+            lines.append(f"... (exibindo os primeiros 1.000 de {format_int(result['records_read_count'])} registros lidos)")
+
         self.records_list.delete(0, "end")
         self.records_list.insert("end", *lines)
         self.root.configure(cursor="")
@@ -491,18 +566,137 @@ class HashIndexApp:
         pages_read = result["cost_io"]
         cost = f"Custo: {format_int(pages_read)} {'página lida' if pages_read == 1 else 'páginas lidas'}"
         read = f"Registros lidos: {format_int(result['records_read_count'])}"
+        elapsed = f"Tempo: {result['time_ms']:.4f} ms"
 
         if result["found"]:
             last = self.records_list.size() - 1
             self.records_list.itemconfigure(last, background=HIGHLIGHT_COLOR)
             self.records_list.see(last)
-            self.scan_result.set(f"Chave encontrada na página {result['page_id']}  |  {cost}  |  {read}")
+            self.scan_result.set(f"Chave encontrada na página {result['page_id']}  |  {cost}  |  {elapsed}  |  {read}")
         else:
             self.records_list.see("end")
-            self.scan_result.set(f"Chave não encontrada  |  {cost}  |  {read}")
+            self.scan_result.set(f"Chave não encontrada  |  {cost}  |  {elapsed}  |  {read}")
 
         self.notebook.select(self.scan_tab)
         self._set_status(f"Table scan executado para '{key}'.")
+
+    def run_comparison(self):
+        # HU11: Executa a comparação entre busca com índice e table scan
+        key = self.search_key.get().strip()
+        if not key or not self.buckets or not self.pages:
+            return
+
+        self.root.configure(cursor="watch")
+        self.root.update_idletasks()
+
+        try:
+            res = compare(key, self.buckets, hash_word_to_bucket, self.pages)
+        finally:
+            self.root.configure(cursor="")
+
+        idx = res["index"]
+        scn = res["scan"]
+
+        status_text = f"Chave comparada: '{key}' — "
+        if res["found"]:
+            status_text += f"Encontrada na Página {idx['page_id']}"
+        else:
+            status_text += "Não encontrada em nenhuma página"
+        self.comparison_summary.set(status_text)
+
+        for item in self.comparison_tree.get_children():
+            self.comparison_tree.delete(item)
+
+        # 1. Tempo de Execução (CA23)
+        t_idx = f"{idx['time_ms']:.4f} ms"
+        t_scn = f"{scn['time_ms']:.4f} ms"
+        t_red = res["time_reduction_pct"]
+        t_diff = res["time_diff_ms"]
+        speedup = res["speedup_ratio"]
+
+        if t_diff >= 0:
+            diff_time_str = f"Índice {t_red:.1f}% mais rápido ({speedup:.1f}x speedup)"
+        else:
+            diff_time_str = f"Scan foi {abs(t_red):.1f}% mais rápido (diferença: {abs(t_diff):.4f} ms)"
+
+        self.comparison_tree.insert("", "end", values=(
+            "Tempo de Execução (CA23)",
+            t_idx,
+            t_scn,
+            diff_time_str
+        ))
+
+        # 2. Custo de I/O / Páginas Lidas (CA24)
+        io_idx = f"{idx['cost_io']} leitura(s)"
+        io_scn = f"{format_int(scn['cost_io'])} leitura(s)"
+        io_red = res["io_reduction_pct"]
+        io_diff = res["io_diff"]
+
+        if io_diff > 0:
+            diff_io_str = f"Redução de {io_red:.1f}% ({io_diff} leituras economizadas)"
+        elif io_diff == 0:
+            diff_io_str = "Mesmo custo (0% de redução)"
+        else:
+            diff_io_str = f"Scan leu {abs(io_diff)} página(s) a menos ({io_red:.1f}%)"
+
+        self.comparison_tree.insert("", "end", values=(
+            "Custo de I/O / Páginas Lidas (CA24)",
+            io_idx,
+            io_scn,
+            diff_io_str
+        ))
+
+        # 3. Detalhamento dos Acessos
+        idx_detail = f"{idx['bucket_reads']} bucket(s) + {idx['page_reads']} pág. dados"
+        scn_detail = f"{format_int(scn['cost_io'])} páginas lidas em sequência"
+        diff_detail = f"{scn['cost_io'] - idx['cost_io']} página(s) de diferença"
+        self.comparison_tree.insert("", "end", values=(
+            "Detalhamento dos Acessos",
+            idx_detail,
+            scn_detail,
+            diff_detail
+        ))
+
+        # 4. Localização do Registro
+        found_idx = f"Página {idx['page_id']}" if idx["found"] else "Não encontrada"
+        found_scn = f"Página {scn['page_id']}" if scn["found"] else "Não encontrada"
+        match_str = "Ambos concordam" if idx["found"] == scn["found"] else "Divergência"
+        self.comparison_tree.insert("", "end", values=(
+            "Localização do Registro",
+            found_idx,
+            found_scn,
+            match_str
+        ))
+
+        # Notas didáticas explicativas (item 2 dos apontamentos)
+        if res["found"] and idx["page_id"] == 0:
+            note = (
+                "📌 Observação sobre chaves no início do arquivo (Página 0):\n"
+                "Para palavras localizadas na página 0, o Table Scan realiza apenas 1 leitura de bloco e para imediatamente. "
+                "Já o Índice Hash requer 2 leituras mínimas obrigatórias (1 leitura do bucket do índice + 1 leitura da página de dados). "
+                "Por essa razão, o custo do índice nesta faixa inicial pode ser superior ao scan (-100% de redução), o que reflete com precisão o "
+                "comportamento real de SGBDs (onde o Query Optimizer prefere Sequential Scan para primeiros blocos ou tabelas muito reduzidas)."
+            )
+        elif res["found"]:
+            note = (
+                f"✅ Eficiência do Índice Hash comprovada:\n"
+                f"O Índice Hash localizou a chave realizando apenas {idx['cost_io']} leitura(s) de disco (I/O), enquanto o Table Scan precisou "
+                f"percorrer sequencialmente {format_int(scn['cost_io'])} páginas. Isso representa uma economia real de {io_red:.1f}% no tráfego de I/O."
+            )
+        else:
+            note = (
+                f"❌ Chave não existente no banco de dados:\n"
+                f"O Índice Hash detectou que a palavra não existe após consultar apenas {idx['cost_io']} bucket(s). "
+                f"Por outro lado, o Table Scan foi forçado a varrer a tabela inteira ({format_int(scn['cost_io'])} páginas lidas) até confirmar a ausência."
+            )
+        self.comparison_notes.set(note)
+
+        # Destaca o bucket acessado na aba de Buckets
+        self._highlight_bucket(idx["bucket_index"])
+        self._show_bucket(idx["bucket_index"], highlight_key=key)
+
+        self.notebook.select(self.comparison_tab)
+        self._set_status(f"Comparativo executado com sucesso para '{key}'.")
 
 
 if __name__ == "__main__":
