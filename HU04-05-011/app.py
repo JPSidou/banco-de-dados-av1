@@ -12,6 +12,7 @@ from table_scan import table_scan
 
 BUCKET_SIZE = 10  # FR: capacidade do bucket definida pela equipe (RN09)
 HIGHLIGHT_COLOR = "#c8f7c5"
+SCAN_CHUNK_SIZE = 5000  # registros inseridos por vez na lista do table scan (RNF01)
 
 
 def read_words(path):
@@ -93,6 +94,7 @@ class HashIndexApp:
         self.pages = []
         self.buckets = []
         self.highlighted_bucket = None
+        self.scan_job = None
 
         self.file_label = tk.StringVar(value="Nenhum arquivo selecionado")
         self.page_size = tk.StringVar()
@@ -307,6 +309,7 @@ class HashIndexApp:
         self.compare_button.configure(state=state)
 
     def _clear_index(self):
+        self._cancel_scan_listing()
         self.pages = []
         self.buckets = []
         self.highlighted_bucket = None
@@ -548,19 +551,12 @@ class HashIndexApp:
         if not key or not self.pages:
             return
 
+        self._cancel_scan_listing()
         self.root.configure(cursor="watch")
         self.root.update_idletasks()
 
-        # Limita a 1.000 registros na visualização para não travar a UI (RNF01)
-        result = table_scan(self.pages, key, max_records=1000)
-
-        # CA21: exibe os registros lidos durante o scan
-        lines = [f"Página {page_id:>6} | {register}" for page_id, register in result["records_read"]]
-        if result["records_truncated"]:
-            lines.append(f"... (exibindo os primeiros 1.000 de {format_int(result['records_read_count'])} registros lidos)")
-
-        self.records_list.delete(0, "end")
-        self.records_list.insert("end", *lines)
+        # RN21: guarda todos os registros lidos até encontrar a chave
+        result = table_scan(self.pages, key)
         self.root.configure(cursor="")
 
         pages_read = result["cost_io"]
@@ -569,16 +565,44 @@ class HashIndexApp:
         elapsed = f"Tempo: {result['time_ms']:.4f} ms"
 
         if result["found"]:
-            last = self.records_list.size() - 1
-            self.records_list.itemconfigure(last, background=HIGHLIGHT_COLOR)
-            self.records_list.see(last)
             self.scan_result.set(f"Chave encontrada na página {result['page_id']}  |  {cost}  |  {elapsed}  |  {read}")
         else:
-            self.records_list.see("end")
             self.scan_result.set(f"Chave não encontrada  |  {cost}  |  {elapsed}  |  {read}")
 
+        # CA21: exibe todos os registros lidos, em blocos, para não travar a interface (RNF01)
+        self.records_list.delete(0, "end")
         self.notebook.select(self.scan_tab)
-        self._set_status(f"Table scan executado para '{key}'.")
+        self._list_scan_records(key, result, 0)
+
+    def _list_scan_records(self, key, result, start):
+        records = result["records_read"]
+        end = min(start + SCAN_CHUNK_SIZE, len(records))
+        lines = [f"Página {page_id:>6} | {register}" for page_id, register in records[start:end]]
+        if lines:
+            self.records_list.insert("end", *lines)
+
+        if end < len(records):
+            self._set_status(
+                f"Table scan de '{key}': listando registros lidos "
+                f"({format_int(end)} de {format_int(len(records))})...")
+            self.scan_job = self.root.after(1, self._list_scan_records, key, result, end)
+            return
+
+        self.scan_job = None
+        last = self.records_list.size() - 1
+        if result["found"] and last >= 0:
+            # o registro encontrado é o último lido
+            self.records_list.itemconfigure(last, background=HIGHLIGHT_COLOR)
+            self.records_list.see(last)
+        else:
+            self.records_list.see("end")
+        self._set_status(
+            f"Table scan executado para '{key}': {format_int(len(records))} registros listados.")
+
+    def _cancel_scan_listing(self):
+        if self.scan_job is not None:
+            self.root.after_cancel(self.scan_job)
+            self.scan_job = None
 
     def run_comparison(self):
         # HU11: Executa a comparação entre busca com índice e table scan
