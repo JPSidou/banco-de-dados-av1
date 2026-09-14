@@ -13,8 +13,9 @@ Aplicação didática, feita em Python com interface Tkinter, que simula um **í
   - taxa de colisões e taxa de overflow;
   - buckets em overflow, buckets de overflow criados e a maior cadeia de overflow.
 - **Busca com índice:** mostra passo a passo o bucket calculado, cada leitura na cadeia de overflow e a página acessada, destacando o registro encontrado.
-- **Table scan:** lê página por página até achar a chave e lista todos os registros lidos no caminho.
-- **Visualização:** abas com a primeira e a última página, a lista de buckets (com navegação direta por número) e o conteúdo de cada bucket com sua cadeia de overflow.
+- **Table scan:** lê página por página até achar a chave, informa o tempo de execução e lista os registros lidos no caminho com limite de exibição para manter a fluidez da UI.
+- **Comparativo Índice x Scan (HU11):** aba dedicada e botão de comparação que contrastam tempo de execução, custo de I/O (páginas lidas), taxa de redução percentual (%) e notas didáticas explicando o comportamento do índice vs. scan para chaves na página 0.
+- **Visualização:** abas com a primeira e a última página, a lista de buckets (com navegação direta por número), o conteúdo de cada bucket com sua cadeia de overflow e tabela comparativa de desempenho.
 
 ## Como funciona
 
@@ -29,18 +30,19 @@ Aplicação didática, feita em Python com interface Tkinter, que simula um **í
 | Taxa de overflow | Buckets com overflow ÷ total de buckets (NB) |
 | Custo da busca com índice | 1 leitura por bucket percorrido na cadeia + 1 leitura da página de dados |
 | Custo do table scan | Quantidade de páginas lidas até encontrar a chave |
+| Comparativo (HU11) | Diferença de tempo (ms), diferença de I/O (páginas lidas) e % de redução |
 
 ## Requisitos
 
 - Python 3.10 ou superior
-- Tkinter (já vem com o Python no Windows e no macOS; no Linux pode ser preciso instalar à parte)
-- `matplotlib`, apenas se for usar `performance_comparator.py`
+- Tkinter (já vem com o Python no Windows e no macOS; no Linux pode ser instalado via `python3-tk`)
+- `matplotlib`, apenas se desejar gerar arquivos PNG com gráficos em lote (opcional)
 
 No Debian/Ubuntu:
 
 ```bash
 sudo apt install python3-tk
-pip install matplotlib  # opcional
+pip install matplotlib  # opcional para exportar gráficos PNG
 ```
 
 ## Como executar
@@ -54,27 +56,27 @@ Na interface:
 
 1. Clique em **Selecionar arquivo .txt** e escolha o arquivo de palavras (uma por linha).
 2. Informe o **tamanho da página** (inteiro maior que zero) e clique em **Construir índice**.
-3. Digite uma **chave de busca** e use **Buscar com índice** (ou `Enter`) ou **Table scan**.
-4. Navegue pelas abas **Páginas**, **Buckets**, **Busca por índice** e **Table scan** para ver os detalhes.
+3. Digite uma **chave de busca** e use **Buscar com índice** (ou `Enter`), **Table scan** ou **Comparar**.
+4. Navegue pelas abas **Páginas**, **Buckets**, **Busca por índice**, **Table scan** e **Comparativo (HU11)** para ver todos os detalhes.
 
 ## Estrutura do projeto
 
 ```
 HU04-05-011/
-├── app.py                    # Interface Tkinter e fluxo da aplicação
+├── app.py                    # Interface Tkinter, abas de navegação e comparativo HU11
 ├── bucket.py                 # Classe Bucket, com inserção e busca na cadeia de overflow
-├── bucket_manager.py         # Cálculo de NB e criação dos buckets
+├── bucket_manager.py         # Cálculo de NB e criação dos buckets com validações defensivas
 ├── hasher.py                 # Função hash que mapeia uma palavra para um bucket
 ├── index_builder.py          # Construção do índice e contagem dos registros indexados
 ├── index_search.py           # Busca pelo índice com registro do caminho percorrido
 ├── index_statistics.py       # Estatísticas de colisão e overflow
-├── table_scan.py             # Busca sequencial página por página
-└── performance_comparator.py # Comparação índice x table scan em lote, com gráficos
+├── table_scan.py             # Busca sequencial página por página com medição de tempo
+└── performance_comparator.py # Lógica de comparação (HU11), testes em lote e exportação gráfica
 ```
 
-### Comparador de desempenho
+### Comparador de desempenho (HU11)
 
-`performance_comparator.py` não é usado pela interface. Ele serve para rodar baterias de testes por código e gerar um gráfico comparativo:
+A função `compare()` é consumida diretamente pela interface gráfica (`app.py`) na aba **Comparativo (HU11)**. Além disso, o arquivo `performance_comparator.py` pode ser executado via script para baterias de testes em lote e exportação de gráficos:
 
 ```python
 from bucket_manager import create_buckets
@@ -91,5 +93,5 @@ build_index(pages, buckets, hash_word_to_bucket)
 
 batch = compare_batch(["casa", "banco", "dados"], buckets, hash_word_to_bucket, pages)
 print(batch["avg_index_io"], batch["avg_scan_io"], batch["avg_io_reduction_pct"])
-plot_charts(batch)  # salva comparativo_hu11.png
+plot_charts(batch)  # salva comparativo_hu11.png se matplotlib estiver instalado
 ```
